@@ -1,0 +1,761 @@
+---
+title: 'R ile Tanımlayıcı İstatistikler ve Hipotez Testleri'
+author: "Funda İpekten"
+date: "13 Mayıs 2022"
+output:
+  
+  pdf_document: 
+  toc: yes
+  extra_dependencies: "subfig"
+  html_document: 
+    df_print: default
+    highlight: tango
+    number_sections: yes
+    theme: cerulean
+    toc: yes
+    toc_depth: 3
+    code_download: no
+header-includes:
+- \usepackage{array}
+- \usepackage{fancyhdr}
+- \pagestyle{fancy}
+- \fancyhead[LO,LE]{R ile Tanımlayıcı İstatistikler ve Hipotez Testleri}
+- \fancyfoot[CO,CE]{Copyright © 2022 Funda İpekten}
+- \fancyfoot[LE,RO]{\thepage}
+---
+
+
+
+# Kütüphaneleri ve veriyi çağırma
+
+```{r load-libraries, warning=FALSE, message=FALSE}
+
+library(magrittr)
+library(rstatix)
+library(ggplot2)
+library(forcats)
+library(PMCMRplus)
+library(readr) 
+library(dplyr)
+library(moments)
+
+```
+
+
+```{r read-data, warning=FALSE, message=FALSE}
+
+tmp <- read_delim("data/nafld.txt", col_names = TRUE)
+dim(tmp)
+head(tmp)
+
+```
+
+<br>
+
+# Değişkenlerin kategorilerini tanımlama
+
+<br>\par\medskip
+```{r, Değişkenlerin kategorilerini tanımlama, warning=FALSE, message=FALSE}
+
+tmp <- tmp %>%
+mutate(Grup = factor(Grup, levels = c(0, 1), labels = c("Kontrol","Steatohepatit")),
+       Grup2 = factor(Grup2, levels = c(0, 1, 2), labels = c("Kontrol","nafld_id_yok", "nafld_id_var")),
+       Cinsiyet = factor(Cinsiyet, levels = c(1, 2), labels = c("Erkek", "Kadın")), 
+       Sigara = factor(Sigara, levels = c(0, 1), labels = c("Kullanmayan", "Kullanan")),
+       Bki_grup = factor(Bki_grup, levels = c(0, 1)),
+       Bki1 = factor(Bki1, levels = c(0, 1), labels = c("Obez olmayan", "Obez olan")),
+       Bki3 = factor(Bki3, levels = c(0, 1), labels = c("Obez olmayan", "Obez olan")),
+       Bki6 = factor(Bki6, levels = c(0, 1), labels = c("Obez olmayan", "Obez olan")))
+
+```
+
+
+``` {r, warning=FALSE, message=FALSE}
+
+dim(tmp)
+head(tmp)
+
+```
+
+
+<br>\par\medskip
+
+# Tanımlayıcı İstatistikler
+
+Dağılımlar,
+
+* Yer (Location) ölçüleri (Aritmetik ortalama, medyan, mod, kantiller, ...)
+* Yaygınlık (Spread) ölçüleri (Varyans,  standart sapma, kantiller arası uzaklık, ...)
+* Şekil (Shape) Ölçüleri (Çarpıklık, Basıklık)
+
+olmak üzere 3 farklı ölçüm ile temsil edilirler. Bu ölçüler tanımlayıcı istatistikler olarak adlandırılır.
+
+
+```{r, Nicel değişken için tanımlayıcı istatistikler (AST), warning=FALSE, message=FALSE}
+
+# Nicel değişken için tanımlayıcı istatistikler (AST)
+
+descAST <- tmp %>%
+  group_by(Grup) %>%
+  summarise(N = n(), Ortalama = mean(AST), Standart.sapma = round(sd(AST), 2), Medyan = median(AST),
+            Q1 = quantile(AST, .25), Q3 = quantile(AST, .75), 
+            Çarpıklık = round(skewness(AST),2), Basıklık = round(kurtosis(AST),2))
+print.data.frame(descAST)
+
+```
+
+<br>\par\medskip
+```{r boxplot-AST, warning=FALSE, message=FALSE}
+tmp %>%
+  ggplot(aes(x = factor(Grup), y = AST)) + 
+    geom_boxplot(fill = "gray90") +
+    theme_bw(base_size = 14)+
+  labs(x="Grup", y="AST")
+
+```
+
+
+<br>\par\medskip
+```{r, Nitel değişken için tanımlayıcı istatistikler ( Bki_grup), warning=FALSE, message=FALSE}
+# Nitel değişken için tanımlayıcı istatistikler ( Bki_grup)
+
+tmp %>%
+  group_by(Grup2) %>%
+  summarise(N = n(), n_obez = sum(Bki_grup == 1),    # 1: Obez olan
+            Percentage = round(100 * n_obez / N, 2)) %>%
+print.data.frame
+
+```
+
+
+<br>\par\medskip
+```{r, Grouped/Stacked bar graphs, warning=FALSE, message=FALSE}
+
+# Grouped/Stacked bar graphs.
+tmp %>%
+  mutate(Grup2 = factor(Grup2), Bki_grup = factor(Bki_grup)) %>%
+  group_by(Grup2, Bki_grup) %>%
+  summarise(N = n()) %>%
+  group_by(Grup2, .drop = TRUE) %>%
+  mutate(Percentage = 100 * N / sum(N)) %>%
+  ggplot(aes(x = Grup2, y = Percentage, fill = Bki_grup)) + 
+    geom_bar(stat = "identity", colour = "white", 
+             position = position_dodge(), width = .7) +
+    theme_bw(base_size = 14) + 
+    theme(panel.background = element_rect(fill = "gray95")) +
+    labs(x = "Grup 2") + 
+    scale_fill_discrete(name = "Bki Grup", 
+                        labels = c("Obez olan", "Obez olmayan"))
+
+# Grouped/Stacked bar graphs.
+myplot <- tmp %>%
+  mutate(Grup2 = factor(Grup2), Bki_grup = factor(Bki_grup)) %>%
+  group_by(Grup2, Bki_grup) %>%
+  summarise(N = n()) %>%
+  group_by(Grup2, .drop = TRUE) %>%
+  mutate(Percentage = 100 * N / sum(N)) %>%
+  ggplot(aes(x = Grup2, y = Percentage, fill = Bki_grup)) + 
+    geom_bar(stat = "identity", colour = "white", width = .7) +
+    theme_bw(base_size = 14) + 
+    theme(panel.background = element_rect(fill = "gray95")) + 
+    scale_fill_discrete(name = "Bki Grup", 
+                        labels = c("Obez olan", "Obez olmayan"))
+print(myplot)
+ 
+myplot + 
+  geom_label(aes(label = paste0(round(Percentage, 2), "%"), colour = Bki_grup), 
+             size = 4, fontface = "bold", fill = "white", show.legend = FALSE,
+             label.padding = unit(0.35, "lines"), 
+             position = position_stack(vjust = .50))
+```
+
+
+# Normallik Testleri
+
+İstatistiksel analizler çeşitli varsayımlara dayanmaktadır. Bu varsayımlardan bir tanesi de değişkenlerin normal dağılıma sahip olması varsayımıdır. 
+
+Çoğu zaman bu varsayım ihmal edilerek güvenilir olmayan sonuçlar ortaya çıkmaktadır.
+
+İstatistiksel yöntemlerin birçoğunda yapılacak analizin türüne bağlı olarak veriler normal dağılıma sahip olmak zorundadır. 
+
+Ancak bu varsayımın her zaman sağlanamadığı ve çeşitli sebeplerle zaman zaman verilerin dağılımında normalden sapmaların ortaya çıktığı görülmektedir.
+
+Dağılımın normal olup olmadığı üç farklı yaklaşımdan hareketle ortaya konulabilir. Bu yaklaşımlar;
+
+* Çarpıklık ($\alpha_3$) ve basıklık ($\alpha_4$) ölçüleri
+* Grafikler (Histogram, Q-Q, P-P, ...)
+* Hipotez testleri (Shapiro-Wilk, Kolmogorov-Smirnov, Anderson-Darling, ...)
+
+**http://biosoft.erciyes.edu.tr/app/MVN**
+
+
+```{r, Ağırlığa ait çarpıklık ve basıklık ölçüleri, warning=FALSE, message=FALSE}
+
+# Ağırlığa ait çarpıklık ve basıklık ölçüleri
+
+sekil_olcusu <- tmp %>%
+  group_by(Grup) %>%
+  summarise(N = n(), Çarpıklık = round(skewness(Ağırlık),2), 
+                     Basıklık = round(kurtosis(Ağırlık),2))
+print.data.frame(sekil_olcusu)
+
+```
+
+
+```{r, Ağırlığa ait histogram grafiği, warning=FALSE, message=FALSE}
+
+
+# Ağırlığa ait histogram grafiği
+
+tmp %>%
+filter(Bki_grup==1)%>%     # 1: Obez olan
+ggplot(aes(x = Ağırlık, y= ..density..))+
+  geom_histogram(bins = 12, fill = "gray90", colour = "gray60")+
+  geom_density(colour = "blue", linewidth = 2)+
+  theme_bw(base_size = 14) + 
+    labs(y ="Yoğunluk", x = expression("Ağırlık"))
+        
+```
+
+
+
+``` {r, Ağırlığa ait Q-Q grafiği, warning=FALSE, message=FALSE}
+# Ağırlığa ait Q-Q grafiği
+
+qqnorm(tmp %$% Ağırlık, pch = 1, frame = T)
+qqline(tmp %$% Ağırlık, col = "steelblue", lwd = 2)
+
+```
+ 
+
+
+``` {r Ağırlığa ait Shapiro-Wilk hipotez testi}
+# Ağırlığa ait Shapiro-Wilk hipotez testi
+
+# H0: Normal dağılıma uygunluk vardır. 
+# (Serinin dağılımı ile normal dağılım arasında istatistiksel bakımdan anlamlı bir fark yoktur.)
+
+# H1: Normal dağılıma uygunluk yoktur. 
+# (Serinin dağılımı ile normal dağılım arasında istatistiksel bakımdan anlamlı bir fark vardır.)
+
+tmp %>%
+  filter(Bki_grup == 1) %$%    # 1: Obez olan
+  shapiro.test(Ağırlık)
+
+```
+
+
+# Hipotez Testleri
+
+**Hipotez:** Doğruluğu bir araştırma ya da deney ile test edilmeye çalışılan öngörülere, iddialara,  hükümlere denir.
+
+**Hipotez testleri:** Elde edilen değerlerin ya da varılan sonuçların istatistiksel olarak anlamlı olup olmadığını (önem taşıyıp taşımadığını) test etmek için başvurulan yöntemdir. Hipotez testlerinde birbirinin zıddı hükümler içeren iki hipotez bulunmaktadır. 
+
+**Sıfır Hipotezi (Yokluk Hipotezi):**Benzerlik, eşitlik, bağımsızlık, ilişkisizlik gibi ifadeler kullanılmaktadır. $H_0$ sembolü ile gösterilmektedir. Örneklemden elde edilen sonuçların tesadüfe bağlı olduğunu ifade etmektedir. 
+
+* $H_0$:İdrar yolu enfeksiyonu olan ve olmayan gebelerin CRP düzeyleri birbirine eşittir.
+
+**Karşıt Hipotez (Alternatif Hipotez):**Farklılığı, eşit olmayan durumu, bağımlılık gibi ifadeler kullanılmaktadır. $H_1$ sembolü ile gösterilmektedir. Örneklemden elde edilen sonuçların tesadüfe bağlı olmadığını ifade etmektedir. 
+ 
+* $H_1$:İdrar yolu enfeksiyonu olan ve olmayan gebelerin CRP düzeyleri birbirine eşit değildir.
+
+
+Hipotez testleri sonucunda $H_0$ hipotezi **kabul** veya **red** edilir.
+
+
+```{r, echo=FALSE, out.width = '50%', out.height='50%', warning=FALSE, message=FALSE}
+knitr::include_graphics("figure/picture_type.png")
+
+```
+
+
+**İstatistiksel Karar**
+
+Tüm testlerin sonunda, $H_0$ hipotezinin reddedilmesi halinde düşülecek gerçek hata miktarı(p değeri) belirlenir. Bu değer önceden belirlenmiş olan $\alpha$ değeri ile karşılaştırılır.
+
+* $p$ < $\alpha$ ise $H_0$ hipotezi reddedilir. Bu karar, örneklemden elde edilen sonuçların istatistiksel açıdan önemli olduğu yani $H_1$ hipotezinin kabul edildiği anlamına gelir. 
+
+* $p$ > $\alpha$ ise $H_0$ hipotezi kabul edilir. Bu karar, örneklemden elde edilen sonuçların istatistiksel açıdan önemli olmadığı anlamına gelir. 
+
+**İstatistiksel Önemlilik Testinin Seçim Kriterleri**
+
+* Kurulan hipotezde parametre kullanılıp kullanılmamasına,
+* Parametre sayısına,
+* Örnek(grup) sayısına, 
+* Örneklemin bağımlı olup olmadığına, 
+* Test edilecek değişken sayısına 
+ bağlı olarak farklı biçimlerde sınıflandırılır. 
+
+**Test edilen değişken sayısına göre**
+
+* Tek değişkenli önemlilik testleri
+* Çok değişkenli önemlilik testleri
+
+
+**Kurulan hipotezin parametreye dayalı olup olmadığına göre**
+
+* Parametrik önemlilik testleri
+* Parametrik olmayan önemlilik testleri
+
+**Örneklem sayısına göre**
+
+* Tek örneklem testleri
+* İki örneklem testleri
+* k-örneklem testlerii
+
+**Örneklemin bağımlı olup olmadığına göre**
+
+1. **Bağımlı örneklem testleri**
+
+* Bağımlı iki örneklem testleri
+* Bağımlı k-örneklem testleri
+
+2. **Bağımsız örneklem testleri**
+
+* Bağımsız iki örneklem testleri
+* Bağımsız k-örneklem testleri
+
+**Hipotezin kuruluş biçimine göre**
+
+* Ortalamaya dayalı testler
+* Orana dayalı testler
+* Gözlem sayılarına dayalı testler
+* Dağılıma dayalı testler
+* Sıralama puanlarına dayalı testler
+* Uyuma, uygunluğa dayalı testler
+* ...
+
+
+## Tek örneklem t testi (One sample t test)
+
+**Varsayımlar**
+
+* Örneklem ilgili kitleden **rastgele** ve **tek örneklem** grubundan seçilmiş olmalıdır. 
+* İlgili değişken nicel olmalıdır.
+* ilgili değişken normal dağılıma uymalıdır.
+* Kitle ortalamasının belli bir değere eşit olup olmadığı test edilir.
+
+**Örnek:** Obez olan grupta ALT düzeyinin ortalamasının 35'e eşit olup olmadığı araştırılmak istenmektedir. İlgili örnek için hipotez aşağıdaki gibidir.
+
+
+\begin{align*}
+  H_0:&~ \mu_{ALT} = 35 \\
+  H_1:&~ \mu_{ALT} \neq 35
+\end{align*}
+
+
+
+``` {r, Tek örneklem t testi, warning=FALSE, message=FALSE}
+# Tek örneklem t testi
+
+tmp %>%
+  filter(Bki_grup == 1) %$%   # 1: Obez olan
+  t.test(x = ALT, alternative = "two.sided", mu = 35, conf.level = .95)
+
+```
+
+
+
+## İşaret testi (Sign test)
+
+**Varsayımlar**
+
+* Örneklem ilgili kitleden **rastgele** ve **tek örneklem grubundan** seçilmiş olmalıdır. 
+* İlgili değişken **nicel** olmalıdır.
+* ilgili değişken normal dağılıma uymamalıdır.
+* Kitle ortalamasının belli bir değere eşit olup olmadığı test edilir.
+
+**Örnek:** Obez olan grupta Tg1 düzeyinin ortancasının 150'ye eşit olup olmadığı araştırılmak istenmektedir. İlgili örnek için hipotez aşağıdaki gibidir.
+
+
+\begin{align*}
+  H_0:&~ \mu_{Tg1} = 150 \\
+  H_1:&~ \mu_{Tg1} \neq 150
+\end{align*}
+
+```{r, İşaret testi, warning=FALSE, message=FALSE}
+# İşaret testi
+
+tmp %>%
+  filter( Bki_grup == 1) %$%   # 1: Obez olan
+  wilcox.test(x = Tg1, alternative = "two.sided", mu = 150, conf.level = .95, 
+              correct = FALSE, exact = FALSE)
+
+```
+
+
+## Bağımsız iki örneklem t testi (Independent two sample t test)
+
+**Varsayımlar**
+
+* İki örneklem ilgili kitlelerden **rastgele seçilmiş** ve **bağımsız** olmalıdır. 
+* İlgili değişken **nicel** olmalıdır.
+* ilgili değişken her iki grupta da normal dağılıma uymalıdır.
+* Grup varyansları **homojen** olmalıdır.
+* Bilinmeyen iki kitle ortalaması arasında anlamlı bir fark olup olmadığı test edilir.
+
+**Örnek:** Sigara içen ve içmeyen bireyler arasında glukoz değişkeninin ortalama farkının sıfıra eşit olup olmadığı araştırılmak istenmektedir. İlgili örnek için hipotez aşağıdaki gibidir.
+
+
+\begin{align*}
+  H_0:&~ \mu_{Sigara(+)} - \mu_{Sigara(-)} = 0 \\
+  H_1:&~ \mu_{Sigara(+)} - \mu_{Sigara(-)} \neq 0
+\end{align*}
+
+
+```{r, Varyans homojenliği, warning=FALSE, message=FALSE}
+# Varyans homojenliği Levene testiyle değerlendirilir.
+
+library(DescTools) # For activating LeveneTest
+
+LeveneTest(Glukoz ~ factor(Sigara), data = tmp)
+  
+```
+
+
+```{r, Bağımsız iki örneklem t testi, warning=FALSE, message=FALSE}
+# Bağımsız iki örneklem t testi
+
+  t.test(Glukoz ~ factor(Sigara), var.equal = TRUE, data = tmp)
+
+```
+
+## Mann-Whitney U testi (Wilcoxon Rank Sums test)
+
+**Varsayımlar**
+
+* İki örneklem ilgili kitlelerden **rastgele seçilmiş** ve **bağımsız** olmalıdır. 
+* İlgili değişken **nicel** değişken olmalıdır.
+* ilgili değişken en az bir grupta normal dağılıma uymamalıdır.
+* İki kitle ortancaları arasında anlamlı bir fark olup olmadığı test edilir.
+
+**Örnek:** Bireylerin Tg1 ortanca değerleri, sigara içen ve içmeyen bireyler arasında farklılık yaratıp yaratmadığı araştırılmak istenmektedir. İlgili örnek için hipotez aşağıdaki gibidir.
+
+
+\begin{align*}
+  H_0:&~ \mu_{Sigara(+)} - \mu_{Sigara(-)} = 0 \\
+  H_1:&~ \mu_{Sigara(+)} - \mu_{Sigara(-)} \neq 0
+\end{align*}
+
+
+```{r, Mann-Whitney U testi, warning=FALSE, message=FALSE}
+# Mann-Whitney U testi
+
+wilcox.test(Glukoz ~ factor(Sigara), correct = FALSE, data = tmp)
+
+```
+
+## Tek yönlü varyans analizi (ANOVA)
+
+**Varsayımlar**
+
+* k>2 örneklem ilgili kitlelerden **rastgele seçilmiş** ve **bağımsız** olmalıdır. 
+* İlgili değişken **nicel** olmalıdır.
+* ilgili değişken tüm alt gruplarda normal dağılıma uymalıdır.
+* Grup varyansları **homojen** olmalıdır.
+* k adet kitle ortalaması arasında anlamlı bir fark olup olmadığı test edilir. 
+
+**Örnek:** Bireylerin glukoz ortalama değerleri, gruplar arasında farklılık yaratıp yaratmadığı araştırılmak istenmektedir. İlgili örnek için hipotez aşağıdaki gibidir.
+
+\begin{align*}
+  H_0:&~ \mu_{nafld(+)} = \mu_{nafld(-)} = \mu_{kontrol} \\
+  H_1:&~ \text{En az bir grup ortalaması diğerlerinden farklıdır.}
+\end{align*}
+
+
+
+```{r, Tek yönlü varyans analizi, warning=FALSE, message=FALSE}
+# Tek yönlü varyans analizi
+
+tmp %>%
+  filter(complete.cases(Glukoz, Grup2)) %>%
+  aov(Glukoz ~ Grup2, data = .) %>%
+  summary()
+
+```
+
+
+
+```{r, Çoklu karşılaştırma Sonuçları(Post-hoc test), warning=FALSE, message=FALSE}
+# Çoklu karşılaştırma (Tek yönlü varyans analizi)
+
+tmp %>%
+  filter(complete.cases(Glukoz, Grup2)) %>%
+  aov(Glukoz ~ Grup2, data = .) %>%
+  TukeyHSD()
+
+```
+
+## Kruskal-Wallis
+
+**Varsayımlar**
+
+* k>2 örneklem ilgili kitlelerden **rastgele seçilmiş** ve **bağımsız** olmalıdır. 
+* İlgili değişken **nicel** veya **sıralı nitelik** değişken olmalıdır.
+* ilgili değişken en az bir alt grupta normal dağılıma uymamalıdır.
+* k adet kitle ortancaları arasında anlamlı bir fark olup olmadığı test edilir. 
+
+
+**Örnek:** Bireylerin Tg1 ortanca değerleri, gruplar arasında farklılık yaratıp yaratmadığı araştırılmak istenmektedir. İlgili örnek için hipotez aşağıdaki gibidir.
+
+
+\begin{align*}
+  H_0:&~ \text{Grup ortancaları birbirine eşittir.} \\
+  H_1:&~ \text{En az bir grup ortancası diğerlerinden farklıdır.}
+\end{align*}
+
+
+```{r, Kruskal-Wallis, warning=FALSE, message=FALSE}
+# Kruskal-Wallis 
+
+tmp %>%
+  filter(complete.cases(Grup2, Tg1)) %>%
+  kruskal.test(Tg1 ~ Grup2, data = .)
+
+```
+
+
+```{r, Çoklu karşılaştırma (Kruskal-Wallis), warning=FALSE, message=FALSE}
+
+# Çoklu karşılaştırma (Kruskal-Wallis)
+
+kwAllPairsConoverTest(Tg1 ~ Grup2, data = tmp)
+
+```
+
+
+## Bağımlı iki örneklem t testi (Eşleştirilmiş t testi)
+
+**Varsayımlar**
+
+* Örneklem ilgili kitleden **rastgele seçilmiş** ve **bağımlı** olmalıdır.
+* İlgili değişken **nicel** olmalıdır.
+* Bağımlı ölçümler arasındaki farklılık normal dağılıma uymalıdır.
+* İki tekrarlı ölçüm ortalaması arasında anlamlı bir fark olup olmadığı test edilir.
+
+
+**Örnek:** Diyet öncesi ve sonrası bireylerin ağırlık ortalamalarının farkının sıfıra eşit olup olmadığı araştırılmak istenmektedir. İlgili örnek için hipotez aşağıdaki gibidir.
+
+
+\begin{align*}
+  H_0:&~ \mu_{Ağırlık1} - \mu_{Ağırlık3} = 0 \\
+  H_1:&~ \mu_{Ağırlık1} - \mu_{Ağırlık3} \neq 0
+\end{align*}
+
+
+
+```{r, Eşleştirilmiş t testi, warning=FALSE, message=FALSE}
+# Eşleştirilmiş t testi
+# 
+  t.test(tmp$Ağırlık3, tmp$Ağırlık1, paired = TRUE, alternative = "two.sided")
+
+```
+
+
+## Wilcoxon testi
+
+**Varsayımlar**
+
+* Örneklem ilgili kitleden **rastgele seçilmiş** ve **bağımlı** olmalıdır.
+* İlgili değişken **nicel** olmalıdır.
+* Bağımlı ölçümler arasındaki farklılık normal dağılıma uymamalıdır.
+* İki tekrarlı ölçüm ortalaması arasında anlamlı bir fark olup olmadığı test edilir.
+
+
+**Örnek:** Diyet öncesi ve sonrası bireylerin trigliserid düzeylerinin farkının sıfıra eşit olup olmadığı araştırılmak istenmektedir. İlgili örnek için hipotez aşağıdaki gibidir.
+
+
+\begin{align*}
+  H_0:&~ \text{Diyet öncesi ve sonrası bireylerin trigliserit düzeyleri değişmemektedir.} \\
+  H_1:&~ \text{Diyet öncesi ve sonrası bireylerin trigliserit düzeyleri anlamlı düzeyde değişmektedir.}
+\end{align*}
+
+
+
+```{r, Wilcoxon testi, warning=FALSE, message=FALSE}
+# Wilcoxon testi
+  wilcox.test(x = tmp$Tg3, y = tmp$Tg1, mu = 0, alternative = "two.sided", 
+              paired = TRUE, correct = FALSE, exact = FALSE)
+
+```
+
+
+## Tekrarlı ölçümlerde varyans analizi (Repeated measures ANOVA)
+
+**Varsayımlar**
+
+* Örneklem ilgili kitleden **rastgele seçilmiş** ve **bağımlı** olmalıdır.
+* İlgili değişken **nicel** olmalıdır.
+* İlgili ölçümler normal dağılıma uymalıdır.
+* Küresellik varsayımı sağlanmalıdır.
+* 2'den fazla tekrarlı ölçüm ortalamaları arasında anlamlı bir fark olup olmadığı test edilir. 
+
+**Örnek:** Bireylerin ağırlık ortalama değerleri, zamanlar (1.ay, 3.ay ve 6.ay) arasında anlamlı bir fark olup olmadığı araştırılmak istenmektedir. İlgili örnek için hipotez aşağıdaki gibidir.
+
+\begin{align*}
+  H_0:&~ \mu_{Ağırlık1} = \mu_{Ağırlık3} = \mu_{Ağırlık6} \\
+  H_1:&~ \text{En az bir ölçümün ortalaması diğerlerinden anlamlı düzeyde farklıdır.}
+\end{align*}
+
+
+
+```{r, Tekrarlı ölçümlerde tek yönlü varyans analizi, warning=FALSE, message=FALSE}
+
+# Tekrarlı ölçümlerde tek yönlü varyans analizi
+
+library(rstatix)
+
+df <- tmp %>%
+  select(Gozlem_no, Ağırlık1, Ağırlık3, Ağırlık6) %>%
+  gather(key = "time", value = "score", Ağırlık1, Ağırlık3, Ağırlık6) %>%
+  convert_as_factor(Gozlem_no, time)
+head(df, 3)
+res.aov <- anova_test(data = df, dv = score, wid = Gozlem_no, within = time)
+get_anova_table(res.aov)
+
+```
+
+
+
+```{r, Çoklu karşılaştırma (Tekrarlı ölçümlerde tek yönlü varyans analizi), warning=FALSE, message=FALSE}
+
+# Çoklu karşılaştırma (Tekrarlı ölçümlerde tek yönlü varyans analizi)
+
+pwc <- df %>%
+  pairwise_t_test(
+    score ~ time, paired = TRUE,
+    p.adjust.method = "bonferroni")
+pwc
+
+```
+
+## Friedman testi
+
+**Varsayımlar**
+
+* Örneklem ilgili kitleden **rastgele seçilmiş** ve **bağımlı** olmalıdır.
+* İlgili değişken **nicel** veya **sıralı nitelik** olmalıdır.
+* İlgili ölçümler normal dağılıma uymamalıdır.
+* 2'den fazla tekrarlı ölçüm ortancaları arasında anlamlı bir fark olup olmadığı test edilir. 
+
+
+**Örnek:** Bireylerin trigliserid ortanca değerleri, zamanlar (1.ay, 3.ay ve 6.ay) arasında anlamlı bir fark olup olmadığı araştırılmak istenmektedir. İlgili örnek için hipotez aşağıdaki gibidir.
+
+\begin{align*}
+  H_0:&~ \text{Zamanlar arasında anlamlı bir farklılık yoktur.} \\
+  H_1:&~ \text{En az bir ölçüm diğerlerinden anlamlı düzeyde farklıdır.}
+\end{align*}
+
+
+```{r, Friedman test, warning=FALSE, message=FALSE}
+
+# Friedman test
+
+Tg1 <- tmp$Tg1
+Tg3 <- tmp$Tg3
+Tg6 <- tmp$Tg6
+TG_matrix <- cbind(Tg1, Tg3, Tg6)
+friedman.test(TG_matrix)
+
+```
+
+
+```{r, Çoklu karşılaştırma (Friedman testi), warning=FALSE, message=FALSE}
+
+# Çoklu karşılaştırma (Friedman testi)
+
+rownames(TG_matrix) <- 1:40
+frdAllPairsNemenyiTest(y=TG_matrix)
+
+```
+
+## McNemar's testi
+
+**Varsayımlar**
+
+* Örneklem ilgili kitleden **rastgele seçilmiş** ve **bağımlı** olmalıdır.
+* İlgili değişken **nitel** olmalıdır.
+* İlgili nitel değişkenin iki ölçümü olmalı, her ölçüm aynı 2 kategoriden oluşmalıdır (var-yok, başarılı-başarısız, vs.).
+
+
+**Örnek:** Diyet öncesi ve sonrası bireylerin beden kitle indeks oranlarında değişim görülüp görülmediği araştırılmak istenmektedir. İlgili örnek için hipotez aşağıdaki gibidir.
+
+\begin{align*}
+  H_0:&~ p_{Bki1} = p_{Bki3} \\
+  H_1:&~ p_{Bki1} \neq p_{Bki3}
+\end{align*}
+
+
+```{r, McNemars testi, warning=FALSE, message=FALSE}
+
+# McNemar's testi
+
+mcnemar.test(tmp$Bki1, tmp$Bki3)
+
+```
+
+
+## 2*2 kontenjans tablosu 
+
+**Varsayımlar**
+
+**Örnek:** Bireylerin sigara içme durumları ile Obezite olmaları açısından istatistiksel olarak bir ilişki olup olmadığı araştırılmak istenmektedir. İlgili örnek için hipotez aşağıdaki gibidir.
+
+\begin{align*}
+  H_0:&~ P_{Obez(+)} = P_{Obez(-)}  \\
+  H_1:&~ P_{Obez(+)} \neq P_{Obez(-)}
+\end{align*}
+
+
+* Örneklem ilgili kitlelerden rastgele seçilmiş ve bağımsız olmalıdır.
+* İlgili değişkenler nitel olmalıdır.
+
+
+```{r, 2*2 kontenjans tablosu, warning=FALSE, message=FALSE}
+
+# 2*2 kontenjans tablosu 
+
+ctab <- table(tmp$Sigara, tmp$Bki1)
+print(ctab)
+ctab %>%
+  chisq.test(correct = T)
+
+```
+
+
+```{r, Fishers düzeltme testi, warning=FALSE, message=FALSE}
+
+#Fisher's düzeltme testi
+
+fisher.test(ctab)
+
+```
+
+## R*C kontenjans tablosu 
+
+**Varsayımlar**
+
+**Örnek:** Bireylerin grup2 (nafld+, nafld-, kontrol) ile Obezite olmaları açısından istatistiksel olarak bir ilişki olup olmadığı araştırılmak istenmektedir. İlgili örnek için hipotez aşağıdaki gibidir.
+
+\begin{align*}
+  H_0:&~ P_{Obez(+)} = P_{Obez(-)}  \\
+  H_1:&~ P_{Obez(+)} \neq P_{Obez(-)}
+\end{align*}
+
+
+* Örneklem ilgili kitlelerden rastgele seçilmiş ve bağımsız olmalıdır.
+* İlgili değişkenler nitel olmalıdır.
+* En az bir grupta k>2 olmalıdır.
+
+```{r, R*C kontenjans tablosu (Pearsons ki-kare analizi), warning=FALSE, message=FALSE}
+
+# R*C kontenjans tablosu (Pearson's ki-kare analizi)
+
+ctab <- table(tmp$Grup2, tmp$Bki1)
+print(ctab)
+ctab %>%
+  chisq.test(correct = F)
+
+```
+
+
