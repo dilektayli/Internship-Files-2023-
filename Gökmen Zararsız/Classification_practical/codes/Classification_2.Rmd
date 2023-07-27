@@ -1,0 +1,429 @@
+---
+title: "R ile Sınıflandırma Analizleri - II"
+author: "Doç. Dr. Gökmen Zararsız"
+date: "Mayıs 14, 2022"
+output:
+  pdf_document:
+    toc: yes
+    toc_depth: 4
+  html_document:
+    toc: yes
+    toc_depth: 4
+header-includes:
+- \usepackage{fancyhdr}
+- \pagestyle{fancy}
+- \fancyhead[CO,CE]{Uygulamalı Tıpta Yapay Zeka Eğitimi}
+- \fancyfoot[CO,CE]{Copyright © 2022 ERFARMA, Personalized Medicine and Advanced Analytics Research Group}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 1.Uygulama 2
+### 1.1. Veri Seti
+Veri seti UCI Machine Learning veritabanından alınmıştır (https://archive.ics.uci.edu/ml/datasets/Breast+Cancer+Wisconsin+(Diagnostic)). Meme kanseri verisidir (Wisconsin Diagnostic Breast Cancer (WDBC)). 569 gözlem ve 30 değişkenden oluşmaktadır. Amaç memede tespit edilen kitleyi iyi huylu (benign - B) ve kötü huylu (malign - M) olarak sınıflamaktır.  
+
+
+```{r data, warning=FALSE, message=FALSE}
+data = read.table(file = "../data/wbdc2.txt", header = TRUE)
+head(data[1:5])
+```
+
+```{r dataDim, warning=FALSE, message=FALSE}
+dim(data)
+```
+
+Değişken tiplerini görmek için `str` fonksiyonu kullanılabilir.
+
+```{r str, warning=FALSE, message=FALSE}
+str(data[,1:5])
+```
+
+
+### 1.2. Veri Görselleştirme
+
+Herhangi bir modelleme adımı uygulanmadan önce verideki değişkenlerin sınıf (yanıt, çıktı, etiket) değişkeni ile ilişkilerini görsel olarak incelemek değişkenlerin modele katkısı hakkında öncül bilgiler verecektir.
+
+`caret` paketinde bulunan `featurePlot` fonksiyonu kullanılarak çeşitli `lattice` grafikleri oluşturulabilir.
+
+**Scatterplot Matrix**
+
+```{r scatter, warning=FALSE, message=FALSE, fig.height=6, fig.width=6}
+library(caret)
+
+featurePlot(x = data[,6:9], 
+            y = factor(data$diagnosis), 
+            plot = "ellipse",
+            auto.key = list(columns = 3))
+
+```
+
+
+**Boxplot**
+```{r box, warning=FALSE, message=FALSE}
+library(caret)
+featurePlot(x = data[,6:9], 
+            y = factor(data$diagnosis), 
+            plot = "box",
+            auto.key = list(columns = 3))
+
+```
+
+### 1.3. Veri Ön-işleme
+
+#### 1.3.1. Sıfıra Yakın Varyanslı Değişkenlerin Tespiti
+
+Bazı durumlarda, veri üretme mekanizmasından kaynaklı olarak bazı nicel değişkenler sıfıra yakın varyansa sahip olabilirler. Bu durum, bir çok algoritmada (karar ağacı tabanlı algoritmalar hariç) sorunlara yol açabilir (hatalı kestirimler, tekil matris problemi, vb.)
+
+Benzer şekilde, bazı nicel değişkenler sadece sıklığı az birkaç değerden oluşabilir. Böyle bir durumda çapraz geçerlilik veya bootstrap örnekleme yapıldığında bu değişkenlerde sıfıra yakın varyanslılık problemi ortaya çıkacaktır. Bu nedenle model kurma işlemine geçmeden önce, sıfıra yakın varysansa (near-zero-variance) sahip değişkenlerin tespit edilip veriden çıkarılması gerekir. 
+
+Sıfıra yakın varyanslı değişkenleri tespit etmek için aşağıdaki ölçüler hesaplanabilir:
+
+**Sıklık oranı (frequency ratio):** en sık görülen değerin en sık görülen ikinci değere oranı. Bu değerin 1'e yakın olması iyi bir durum iken, bu değerin çok büyük olması sıfıra yakın varyanslılık probleminin bir işaretidir.
+
+**Tekil değerlerin yüzdesi (percent of unique values):** değişkendeki tekil değerlerin sayısının toplam gözlem sayısına bölümü (x100) ile elde edilir. 100'e yakın olması istenir. 
+
+Eğer bir değişken için sıklık oranı belirli bir eşik değerinden büyükse ve tekil değerlerin yüzdesi belli bir eşik değerin altında ise, o değişken sıfıra yakın varyanslı değişken olarak adlandırılır ve veriden çıkarılır.
+
+
+```{r nzv, warning=FALSE, message=FALSE}
+nzv <- nearZeroVar(data, saveMetrics= TRUE, freqCut = 10, uniqueCut = 10)
+nzv
+```
+
+
+```{r dimData, warning=FALSE, message=FALSE}
+dim(data)
+```
+
+```{r filteredData, warning=FALSE, message=FALSE}
+nzv <- nearZeroVar(data, saveMetrics= FALSE, freqCut = 10, uniqueCut = 10)
+names(data[nzv])
+```
+
+```{r filteredData2, warning=FALSE, message=FALSE}
+filteredData <- data[, -nzv]
+dim(filteredData)
+```
+
+#### 1.3.2. Yüksek İlişkili Değişkenlerin Tespiti
+
+Bazı algoritmalar değişkenler arasındaki yüksek ilişkilere bağlı olarak geliştirilmiştir ve bu algoritmalar için değişkenler arasında yüksek korelasyon olması istenir (Partial Least Squares). Ancak, birçok makine öğrenimi algoritması değişkenler arasındaki yüksek ilişkiden olumsuz etkilenir ve değişkenler arasındaki korelasyon azaldığında performansları artar.
+
+`caret` paketinde bulunan `findCorrelation` fonksiyonu kullanılarak istenilen kesim noktasına göre yüksek ilişkili değişkenler tespit edilebilir. Bu fonksiyon, her değişken için ortalama mutlak korelasyonu hesaplar ve en büyük ortalama mutlak korelasyona sahip değişkeni veriden çıkarır. Başka bir deyişle, veriden hangi değişkenin çıkarılacağına karar verirken ilgili değişkenin verideki diğer değişkenlerle korelasyonuna bakılır ve en yüksek ortalama mutlak korelasyona sahip değişken modelden çıkarılır. 
+
+```{r corr, warning=FALSE, message=FALSE}
+corr <-  cor(filteredData[,-1])
+highlyCorr <- findCorrelation(corr, cutoff = 0.95)
+removedVars <- names(filteredData[,-1])[highlyCorr]
+removedVars
+```
+
+```{r filteredHighCorr, warning=FALSE, message=FALSE}
+filteredData <- filteredData[,!(names(filteredData)%in%removedVars)]
+dim(filteredData)
+```
+
+#### 1.3.3. z Standartlaştırması
+
+Değişkenlerin standartlaştırılarak aynı birime indirgenmeleri model performansını arttırabilir. `caret` paketinde bulunan `preProcess` fonksiyonu kullanılarak z-standartlaştırması yapılabilir. Burada dikkat edilmesi gereken nokta standartlaştırmanın eğitim veri setine uygulanması ve test setine standartlaştırma uygulanırken eğitim setinden elde edilen ortalama ve standart sapma değerlerinin kullanılmasıdır. 
+
+```{r ztransform, warning=FALSE, message=FALSE, eval=FALSE}
+## bu fonksiyon şu anda çalıştırılmayacak
+## eğitim ve test setleri belirlendikten sonra çalıştırılacak
+# preProcValues <- preProcess(training, method = c("center", "scale")) 
+# trainStandardized <- predict(preProcValues, training)
+# testStandardized <- predict(preProcValues, test)
+```
+
+
+### 1.4. Eğitim ve Test Setlerinin Oluşturulması
+
+Model oluşturmak için öncelikle algoritmanın eğitileceği eğitim (training) seti ve eğitilen modelin performansının test edileceği test seti oluşturulmalıdır. Eğitim ve test setlerinin hangi oranlarda oluşturulacağına ilişikin standart bir oran bulunmamakla birlikte %80 (eğitim)- %20 (test), %70 (eğitim) / %30 (test) sıklıkla kullanılan oranlardır. Bu oranlar veri setinin büyüklüğüne göre belirlenmelidir.
+
+`caret` paketinde bulunan `createDataPartition` fonksiyonu kullanılarak eğitim ve test setleri belirlenebilir.
+
+
+```{r partioning, warning=FALSE, message=FALSE}
+ library(caret)
+ set.seed(1881)
+ inTrain <- createDataPartition(y = filteredData$diagnosis, ## sınıf değişkeni
+ p = 0.80, ## eğitim seti oranı 
+ list = FALSE,
+ times = 1)
+
+ head(inTrain)
+
+```
+
+```{r trainSize, warning=FALSE, message=FALSE}
+ training <- filteredData[ inTrain, ]
+ testing <- filteredData[-inTrain, ]
+ nrow(training)
+```
+
+```{r testSize, warning=FALSE, message=FALSE}
+ nrow(testing)
+```
+
+Eğitim ve test setlerine z-standarlaştırmasının uygulanması.
+
+```{r preproc, warning=FALSE, message=FALSE, eval=TRUE}
+preProcValues <- preProcess(training, method = c("center", "scale"))
+trainStandardized <- predict(preProcValues, training)
+testStandardized <- predict(preProcValues, testing)
+```
+
+### 1.5. Değişken Seçimi
+
+caret paketinde bulunan `train` fonksiyonu ile eğitilen algoritmaların bir çoğu kendi içerisinde değişken seçimi yöntemlerine sahiptirler: `ada`, `AdaBag`, `AdaBoost.M1`, `adaboost`, `bagEarth`, `bagEarthGCV`, `bagFDA`, `bagFDAGCV`, `bartMachine`, `blasso`, `BstLm`, `bstSm`, `C5.0`, `C5.0Cost`, `C5.0Rules`, `C5.0Tree`, `cforest`, `chaid`, `ctree`, `ctree2`, `cubist`, `deepboost`, `earth`, `enet`, `evtree`, `extraTrees`, `fda`, `gamboost`, `gbm_h2o`, `gbm`, `gcvEarth`, `glmnet_h2o`, `glmnet`, `glmStepAIC`, `J48`, `JRip`, `lars`, `lars2`, `lasso`, `LMT`, `LogitBoost`, `M5`, `M5Rules`, `msaenet`, `nodeHarvest`, `OneR`, `ordinalNet`, `ORFlog`, `ORFpls`, `ORFridge`, `ORFsvm`, `pam`, `parRF`, `PART`, `penalized`, `PenalizedLDA`, `qrf`, `ranger`, `Rborist`, `relaxo`, `rf`, `rFerns`, `rfRules`, `rotationForest`, `rotationForestCp`, `rpart`, `rpart1SE`, `rpart2`, `rpartCost`, `rpartScore`, `rqlasso`, `rqnc`, `RRF`, `RRFglobal`, `sdwd`, `smda`, `sparseLDA`, `spikeslab`, `wsrf`, `xgbLinear`, `xgbTree`. 
+
+Çoğu zaman modellerin kendi değişken seçimi sonucuna göre oluşturdukları modelin performansı, harici bir değişken seçim yöntemi ile elde edilen model performansından daha iyidir.
+
+Bu modeller dışında değişken seçimi için iki yöntem bulunmaktadır (John, Kohavi, ve Pfleger 1994):
+
+**Filtreleme yöntemleri:** model performansı ile ilgilenmeyen, değişkenlerin tek değişkenli istatistiksel yöntemlerle değerlendirildiği ve belirli kriterlere uyan değişkenlerin modele alındığı değişken seçim yöntemleridir. Örneğin, t-testi, ANOVA, ki-kare testi, korelasyon analizi
+
+`caret` paketinde bulunan `sbf` fonksiyonu ile filtreleme yöntemi ile değişken seçimi uygulanabilir.
+
+```{r sbf, warning=FALSE, message=FALSE, eval=TRUE}
+set.seed(1881)
+filterCtrl <- sbfControl(functions = caretSBF, method = "repeatedcv", number = 5, repeats = 1)
+featureSelect <- sbf(x=trainStandardized[,-1], y=factor(trainStandardized[,1]), sbfControl = filterCtrl)
+featureSelect
+```
+
+```{r sbf2, warning=FALSE, message=FALSE, eval=TRUE}
+featureSelect$variables$selectedVars
+```
+
+**Wrapper yöntemler:** iteratif bir süreç ile çoklu model kullanılarak model performansını maksimize eden en uygun değişken kombinasyonu bulunmaya çalışılır. Örneğin, recursive feature elimination, genetic algorithms, ve simulated annealing
+
+`caret` paketinde bulunan `rfe` fonksiyonu ile 'Recursive Feature Elimination' yöntemi uygulanabilir.
+
+```{r rfe, warning=FALSE, message=FALSE, eval=TRUE}
+set.seed(1881)
+
+ctrl <- rfeControl(functions = rfFuncs,
+                   method = "repeatedcv",
+                   number = 5,
+                   repeats = 1,
+                   verbose = FALSE)
+
+featureSelect <- rfe(x=trainStandardized[,-1], y=factor(trainStandardized[,1]),
+                 sizes = c(1:30),
+                 metric = "Accuracy",
+                 rfeControl = ctrl)
+
+featureSelect
+```
+Rfe yöntemi ile seçilen en iyi 16 değişken:
+
+```{r bestrfe, warning=FALSE, message=FALSE, eval=TRUE}
+    bestSubset <- featureSelect$optVariables
+    bestSubset
+```
+
+
+### 1.6. Model Kurma
+
+Veri ön işleme, eğitim ve test setlerinin belirlenmesi ve değişken seçimi adımlarının ardından model kurma adımına geçilebilir.
+
+Öncelikle bir önceki adımda rfe yöntemi ile seçilen değişkenleri kullanarak yeni eğitim ve test setimizi oluşturalım.
+
+```{r fit, warning=FALSE, message=FALSE}
+
+vars = c("diagnosis", bestSubset)
+train = trainStandardized[,vars]
+test = testStandardized[,vars]
+
+train[1:5,1:4]
+
+```
+
+
+```{r dimTrain, warning=FALSE, message=FALSE}
+
+dim(train)
+
+```
+
+
+`caret` paketinde bulunan `train` fonksiyonu kullanılarak model eğitme işlemleri gerçekleştirilir. `train` fonksiyonu kullanılarak;
+
+* parametre optimizasyonunun model performansı üzerindeki etkileri değerlendirilebilir,
+* optimal model parametreleri seçilebilir,
+* eğitim veri seti kullanılarak model performansı kestirilebilir,
+
+`train` fonksiyonu içerisinde yüzlerce farklı makine öğrenimi algoritması eğitilebilir.
+
+**ÖRNEK:** Destek vektör makineleri (support vector machines, SVM) algoritmasını kullanarak eğitim setimizi eğitelim. 
+
+```{r fit2, warning=FALSE, message=FALSE}
+
+ set.seed(1881)
+ svmFit <- train(diagnosis ~ .,
+ data = train,
+ method = "svmRadial")
+
+ svmFit
+
+```
+
+#### 1.6.1. Parametre Optimizasyonu
+
+Birçok makine öğrenimi algoritmasının optimize edilmesi gereken parametreleri bulunmaktadır. 
+
+SVM algoritmasının optimize edilmesi gereken iki parametresi bulunmaktadır: `sigma` ve `C` (cost)
+
+`sigma` ve `C`: yanlış sınıflandırma için cezalandırma parametreleridir.
+
+Model performansını arttırmak için SVM algoritmasının parametreleri olan sigma ve C parametrelerini optimize edelim. Bunu gerçekleştirebilmek için `train` fonksiyonundaki iki argümandan biri kullanılabilir: `tuneLength` ve `tuneGrid`
+
+`tuneLength`: belirli bir uzunluktaki parametreler üzerinden optimizasyon gerçekleştirilir.
+
+`tuneGrid`: kullanıcı tarafından belirlenen belirli bir aralıktaki parametreler üzerinden optimizasyon gerçekleştirilir.
+
+
+```{r tune, warning=FALSE, message=FALSE}
+set.seed(1881)
+svmFit <- train(diagnosis ~ .,
+ data = train,
+ method = "svmRadial",
+ tuneLength = 10)
+ 
+ svmFit
+```
+
+caret paketinde bulunan `trainControl` fonksiyonu ile parametre optimizasyonu için bir takım düzenlemeler yapılabilir. Biz bu uygulamada örneklem seçim yöntemi olarak `repeatedcv` yöntemini kullanacağız. Bu yöntem çapraz geçerliliğin tekrarlı olarak uygulanmış halidir. Aynı fonksiyon içerisinde `repeatedcv` yöntemi için tekrar sayısı (`repeats`) ve çapraz geçerlilik için kat sayısı (`numbers`) belirlenebilir.
+
+
+```{r tune2, warning=FALSE, message=FALSE}
+ set.seed(1881)
+ ctrl <- trainControl(method = "repeatedcv", number = 5, repeats = 3)
+
+ svmFit <- train(diagnosis ~ .,
+ data = train,
+ method = "svmRadial",
+ tuneLength = 10,
+ trControl = ctrl)
+ 
+ svmFit
+```
+
+`train` fonksiyonu içerisinde parametre optimizasyonu için kullanılan ölçü değiştirilebilir. Varsayılan olarak kullanılan `accuracy` ölçüsü yerine `ROC` ölçüsünü kullanalım.
+
+```{r finalModel, warning=FALSE, message=FALSE}
+ set.seed(1881)
+ ctrl <- trainControl(method = "repeatedcv", number = 5, repeats = 3,
+                        classProbs = TRUE, summaryFunction = twoClassSummary)
+ 
+ svmFit <- train(diagnosis ~ ., data = train,
+                   method = "svmRadial",
+                   tuneLength = 10,
+                   trControl = ctrl,
+                   metric = "ROC")
+ 
+ svmFit
+```
+
+
+#### 1.6.2. Model Performansının Test Edilmesi ve Performans Ölçülerinin Elde Edilmesi
+
+`caret` paketinde bulunan `predict` fonksiyonu kullanılarak test seti için sınıf kestirimleri yapılabilir.
+
+```{r predictClassesAccuracySvmFit, warning=FALSE, message=FALSE}
+svmClasses <- predict(svmFit, newdata = test)
+```
+
+`caret` paketinde bulunan `confusionMatrix` fonksiyonu kullanılarak test seti için performans ölçüleri hesaplanabilir.
+
+```{r confusionMatrixSvmFit, warning=FALSE, message=FALSE}
+confusionMatrix(data = svmClasses, factor(test$diagnosis), positive = "M")
+```
+
+`caret` paketinde bulunan `twoClassSummary` fonksiyonu kullanılarak test seti için eğri altında kalan alan (area under the ROC curve) değeri hesaplanabilir.
+
+```{r roc2, warning=FALSE, message=FALSE}
+
+svmProbs <- predict(svmFit, newdata = test, type = "prob")
+rocData <- data.frame(obs = factor(test$diagnosis), pred = svmClasses, svmProbs)
+twoClassSummary(rocData, lev = levels(factor(test$diagnosis)))
+```
+
+
+#### 1.6.3. Model Karşılaştırması
+
+Eğitim veri setini kullanarak bir random forest modeli eğitelim. Bunun için `train` fonksiyonu içerisine `method = "rf"` yazmak yeterli olacaktır.
+
+RF algoritması için `mtry` parametresinin optimize edilmesi gerekir.
+
+`mtry`: RF algoritmasındaki her ağaçta yer alan bölme için rastgele seçilen değişken sayısı. 
+Sınıflandırma probleminde varsayılan olarak değişken sayısının karekökü kadar belirlenirken regresyon probleminde değişken sayısının üçte biri olarak belirlenir.
+
+```{r rdm, warning=FALSE, message=FALSE}
+ set.seed(1881)
+
+ ctrl <- trainControl(method = "repeatedcv", number = 5, repeats = 3,
+                        classProbs = TRUE, summaryFunction = twoClassSummary)
+
+
+ rfFit <- train(diagnosis ~ .,
+ data = train,
+ method = "rf",
+ tuneLength = 10,
+ trControl = ctrl,
+ metric = "ROC")
+ 
+ rfFit
+```
+ 
+```{r confusionMatrix9, warning=FALSE, message=FALSE}
+ rfProbs <- predict(rfFit, newdata = test, type = "prob")
+ rfClasses <- predict(rfFit, newdata = test)
+ confusionMatrix(rfClasses, factor(test$diagnosis), positive = "M") 
+```
+
+```{r rocRF, warning=FALSE, message=FALSE}
+rocData <- data.frame(obs = factor(test$diagnosis), pred = rfClasses, rfProbs)
+twoClassSummary(rocData, lev = levels(factor(test$diagnosis)))
+```
+
+Modellerin performanslarını karşılaştırmak için `caret` paketinde bulunan `resamples` ve `diffs` fonksiyonları kullanılabilir. `resamples` fonksiyonu ile her bir katta ve tekrarda eğitim seti için elde edilen performans ölçüleri elde edilir.
+
+
+```{r resamples, warning=FALSE, message=FALSE}
+ resamps <- resamples(list(svm = svmFit, rf = rfFit))
+ head(resamps$values)
+```
+
+diffs fonksiyonu ile elde edilen performans ölçüleri eşleştirilmiş t testi ile karşılaştırılır.
+
+```{r diffs, warning=FALSE, message=FALSE}
+ diffs <- diff(resamps)
+ summary(diffs)
+```
+
+İki modelin performanslarını kıyaslamak için ROC eğrileri de incelenebilir.
+
+```{r roc, warning=FALSE, message=FALSE}
+library(pROC)
+
+svmRoc=roc(test$diagnosis ~ svmProbs[,1])
+rfRoc=roc(test$diagnosis ~ rfProbs[,1])
+
+{plot = plot(svmRoc)
+plot(rfRoc, add=TRUE, col='red')}
+
+
+```
+
+### 1.7. Değişken Önemliliği
+
+```{r varImp, warning=FALSE, message=FALSE}
+plot(varImp(rfFit, scale = TRUE))
+
+```
+
+
