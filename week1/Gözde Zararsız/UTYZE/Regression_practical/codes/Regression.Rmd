@@ -1,0 +1,289 @@
+---
+title: "R ile Regresyon Analizleri"
+author: "Dr. Öğr. Gözde Ertürk Zararsız"
+date: "Mayıs 15, 2022"
+output:
+  html_document:
+    toc: yes
+    toc_depth: 4
+  pdf_document:
+    toc: yes
+    toc_depth: 4
+header-includes:
+- \usepackage{fancyhdr}
+- \pagestyle{fancy}
+- \fancyhead[CO,CE]{Uygulamalı Tıpta Yapay Zeka Eğitimi}
+- \fancyfoot[CO,CE]{Copyright © 2022 ERFARMA, Personalized Medicine and Advanced Analytics Research Group}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, fig.align='center',
+                      message = FALSE, warning=FALSE, fig.pos = 'h')
+```
+
+<br>
+\newpage
+
+Kurs Öncesi Gereksinimler:
+
+* R 4.2.0 sürümünün kullanılması önerilir.
+* RStudio GUI Desktop
+* MAC Kullanıcılar için XQuartz güncel sürümü.
+* İhtiyaç duyulan R kütüphaneleri: `caret`, `ggplot2`, `dplyr`, `lattice`, `doParallel`, `magrittr`, `pls`, `grid`
+
+Gerekli kütüphaneler yüklendikten sonra aşağıdaki şekilde çağırılır. Ayrıca bu uygulama için gerekli diğer fonksiyonların çağırılmasına ihtiyaç vardır.
+```{r "kutuphane_yükleme"}
+library(caret)
+library(magrittr)
+library(dplyr)
+library(lattice)
+
+source("../functions/findOutliers.R")
+source("../functions/diagnosticPlots.R")
+source("../functions/multiplot.R")
+source("../functions/rmse.R")
+```
+
+<br>
+
+# Giriş
+
+`caret` paketi regresyon (Regression) ve sınıflama (Classification) amacı ile kullanılabilen çok sayıda yöntemi içinde barındırmaktadır. Bu yöntemler yalnızca ***sınıflama*** (discriminant analysis, logistic regression, vb.), yalnızca ***regresyon*** (linear regression, principal component analysis, ridge regression, vb.) veya her iki amaç için kullanılabilmektedir (genel linear modeller, support vector machines, random forests, vb.). `caret` içerisinde yer alan modellerin listesine https://topepo.github.io/caret/index.html üzerinden erişilebilir.
+
+Bu bölümde yalnızca ***regresyon*** tabanlı modeller üzerinde durulacak ve farklı veri setleri üzerinde uygulamalar yapılarak yöntemler arası karşılaştırmalar yapılacaktır.
+
+<br>
+
+## SOCR (Statistics Online Computational Resource) Body Fat Data
+
+`SOCR Body Fat Data` Kaliforniya Üniversitesi, Los Angeles. Veri seti 252 gözlem ve 15 değişkenden oluşmaktadır. İnsanların vücut yağ yüzdelerinin kestirilebilmesi amacı ile toplanmış bir dizi değişkeni içerisinde barındırmaktadır.
+
+  - **UnderwaterDensity** Su altı tartımı ile belirlenen yoğunluk
+  - **BodyFatSiriEqu** Siri (1956) eşitliği ile hesaplanan yağ yüzdesi
+  - **Age** Yaş (yıl)
+  - **Weight** Ağırlık (kg)
+  - **Height** Boy (cm)
+  - **NeckCircumf** Boyun çevresi (cm)
+  - **ChestCircumf** Göğüs çevresi (cm)
+  - **Abdomen2Circumf**Karın çevresi (cm)
+  - **HipCircumf** Kalça çevresi (cm)
+  - **ThighCircumf** Uyluk çevresi (cm)
+  - **KneeCircumf** Diz çevresi (cm)
+  - **AnkleCircumf** Ayak bileği çevresi (cm)
+  - **ExtendBicepsCircumf** Pazı çevresi (cm)
+  - **ForearmCircumf** Ön kol çevresi (cm)
+  - **WristCircumf** El bileği çevresi (cm)
+
+<br>
+
+# Veri Önişleme
+
+\vspace*{8pt}
+
+
+```{r "veri_yükleme"}
+bfd <- read.table("../data/bodyfat.txt", header = TRUE)
+bfd <- bfd[,-2]
+head(bfd)
+```
+## Yanıt değişkeni ile bağımsız değişkenler arası ilişkiler (Saçılım Grafiği)
+
+Öncelikle veri setinin görsel olarak ön incelemesi gerçekleştirilmelidir. Değişkenler arasında ilişki olup olmadığı, varsa bu ilişkinin doğrusal olup olmadığı araştırılmalıdır. Ayrıca, veride herhangi bir aşırı ya da aykırı değere sahip gözlem varsa görsel olarak da tespit edilebilir.
+
+```{r "veri_görsel_önincelemesi"}
+theme1 <- trellis.par.get()
+theme1$plot.symbol$col = rgb(.2, .2, .2, .4)
+theme1$plot.symbol$pch = 16
+theme1$plot.line$col = rgb(1, 0, 0, .7)
+theme1$plot.line$lwd <- 2
+trellis.par.set(theme1)
+
+featurePlot(x = bfd[, -1], y = bfd[, 1], plot = "scatter", type = c("p", "smooth"), span = 0.7)
+```
+
+## Aşırı Değerlerin Tespit Edilmesi ve Veriden Çıkarılması
+
+Veride aşırı değerlerin olduğu görülmektedir. Bu değerler `findOutliers(...)` fonksiyonu yardımıyla tespit edilebilir. Aşırı değerlerin tespiti ve veriden çıkarılması aşağıdaki kodlar yardımıyla gerçekleştirilebilir.
+
+```{r "asiri_degerlerin_tespiti_ve_cikarilmasi"}
+tmp <- lapply(bfd, findOutliers, abs.cutoff.z = 3)
+out.idx <- unique(unlist(tmp)) ## Aykırı gözlemlerin sıra numaraları.
+if (!is.null(out.idx)){
+  bfd <- bfd[-out.idx, ]
+}
+out.idx
+```
+
+Aşırı değerler çıkarıldıktan sonra veri tekrar görsel olarak incelenir. 
+
+```{r "veri_görsel_yeniden_incelemesi"}
+theme1 <- trellis.par.get()
+theme1$plot.symbol$col = rgb(.2, .2, .2, .4)
+theme1$plot.symbol$pch = 16
+theme1$plot.line$col = rgb(1, 0, 0, .7)
+theme1$plot.line$lwd <- 2
+trellis.par.set(theme1)
+
+featurePlot(x = bfd[, -1], y = bfd[, 1], plot = "scatter", type = c("p", "smooth"), span = 0.7)
+```
+## Sıfıra yakın varyanslı ve yüksek düzeyde korele olan değişkenlerin araştırılması
+
+Regresyon modelleme aşamasına geçilmeden önce sıfıra yakın varyanslı değişkenlerin ve yüksek korelasyonlu değişkenlerin varlığı araştırılabilir. Öncelikle veri setinde sıfıra yakın varyanslı değişkenlerin olup olmadığı aşağıdaki biçimde incelenebilir:
+
+```{r "near_zero_variance"}
+nzv <- nearZeroVar(bfd, saveMetrics= TRUE, freqCut = 10, uniqueCut = 10)
+nzv
+```
+
+Görüldüğü üzere veride varyansı sıfıra yakın bir değişkene rastlanmamıştır. `caret` paketinde bulunan `findCorrelation` fonksiyonu kullanılarak istenilen kesim noktasına göre yüksek ilişkili değişkenler tespit edilebilir. Bu fonksiyon, her değişken için ortalama mutlak korelasyonu hesaplar ve en büyük ortalama mutlak korelasyona sahip değişkeni veriden çıkarır.
+
+```{r}
+corr <- cor(bfd)
+highlyCorr <- findCorrelation(corr, cutoff = 0.95)
+highlyCorr
+```
+
+Veride yüksek düzeyde korele yapıda değişkenlere rastlanmamıştır. 
+
+## Eğitim ve test setlerinin oluşturulması
+
+Model oluşturmak için öncelikle algoritmanın eğitileceği eğitim (training) seti ve eğitilen modelin performansının test edileceği test seti oluşturulmalıdır. Eğitim ve test setlerinin hangi oranlarda oluşturulacağına ilişikin standart bir oran bulunmamakla birlikte %80 (eğitim) - %20 (test), %70 (eğitim) / %30 (test) sıklıkla kullanılan oranlardır. Bu oranlar veri setinin büyüklüğüne göre belirlenmelidir. 
+
+`caret` paketinde bulunan createDataPartition fonksiyonu kullanılarak eğitim ve test setleri belirlenebilir.
+
+```{r}
+set.seed(1881)
+inTrain <- createDataPartition(y = bfd$UnderwaterDensity, ## sınıf değişkeni
+                               p = 0.80, ## eğitim seti oranı 
+                               list = FALSE,
+                               times = 1)
+
+head(inTrain)
+train <- bfd[inTrain, ]
+test <- bfd[-inTrain, ]
+dim(train)
+dim(test)
+```
+
+## Verinin standartlaştırılması
+
+Değişkenlerin standartlaştırılarak aynı birime indirgenmeleri model performansını arttırabilir. `caret` paketinde bulunan `preProcess(...)` fonksiyonu kullanılarak z-standartlaştırması yapılabilir. Burada dikkat edilmesi gereken nokta standartlaştırmanın eğitim veri setine uygulanması ve test setine standartlaştırma uygulanırken eğitim setinden elde edilen ortalama ve standart sapma değerlerinin kullanılmasıdır.
+
+```{r}
+preProcValues <- preProcess(train, method = c("center", "scale"))
+train.std <- predict(preProcValues, train)
+test.std <- predict(preProcValues, test)
+```
+
+# Önemli değişkenlerin seçilmesi
+Wrapper yöntemleri ile iteratif bir süreç ile çoklu model kullanılarak model performansını maksimize eden en uygun değişken kombinasyonu bulunmaya çalışılır. Bu yöntemlerden biri recursive feature elimination yöntemidir. Bu yöntem kullanılarak en önemli değişken kümesi aşağıdaki şekilde belirlenebilir.
+
+```{r}
+set.seed(1881)
+ctrl <- rfeControl(functions = rfFuncs,
+                   method = "repeatedcv",
+                   number = 5,
+                   repeats = 1,
+                   verbose = FALSE)
+
+featureSelect <- rfe(x=train.std[,-1], y=train.std[,1],
+                     sizes = c(1:30),
+                     metric = "RMSE",
+                     rfeControl = ctrl)
+
+featureSelect
+bestSubset <- featureSelect$optVariables
+bestSubset
+
+vars <- c("UnderwaterDensity", bestSubset)
+tr <- train.std[,vars]
+ts <- test.std[,vars]
+```
+
+# Regresyon modellerinin uygulanması
+Veri ön işleme, eğitim ve test setlerinin belirlenmesi ve değişken seçimi adımlarının ardından model kurma adımına geçilebilir. `caret` paketinde bulunan train fonksiyonu kullanılarak model eğitme işlemleri gerçekleştirilir. `train` fonksiyonu kullanılarak;
+
+- parametre optimizasyonunun model performansı üzerindeki etkileri değerlendirilebilir,
+- optimal model parametreleri seçilebilir,
+- eğitim veri seti kullanılarak model performansı kestirilebilir,
+- `train` fonksiyonu içerisinde yüzlerce farklı makine öğrenimi algoritması eğitilebilir.
+
+Doğrusal regresyon modelleri (linear regression, LM) algoritmasını kullanarak eğitim setimizi eğitelim:
+
+```{r}
+fitLM <- train(x = tr[,-1], y = tr[,1], method = "lm", tuneLength = 10,
+               trControl = trainControl(method = "repeatedcv", number = 5, repeats = 3))
+fitLM
+```
+
+Radyal tabanlı çekirdek fonksiyon ile destek vektör makineleri (support vector machines, SVM) algoritmasını kullanarak eğitim setimizi eğitelim:
+
+```{r}
+fitSVM <- train(x = tr[,-1], y = tr[,1], method = "svmRadial", tuneLength = 10,
+               trControl = trainControl(method = "repeatedcv", number = 5, repeats = 3))
+fitSVM
+```
+
+Rasgele orman (random forests, RF) algoritmasını kullanarak eğitim setimizi eğitelim:
+
+```{r}
+fitRF <- train(x = tr[,-1], y = tr[,1], method = "rf", tuneLength = 10,
+                trControl = trainControl(method = "repeatedcv", number = 5, repeats = 3))
+fitRF
+```
+
+Lasso algoritmasını kullanarak eğitim setimizi eğitelim:
+
+```{r}
+fitLASSO <- train(x = tr[,-1], y = tr[,1], method = "lasso", tuneLength = 10,
+               trControl = trainControl(method = "repeatedcv", number = 5, repeats = 3))
+fitLASSO
+```
+
+
+# Model performanslarının değerlendirilmesi ve karşılaştırılması
+`caret` paketi içerisinde yer alan `predict` fonksiyonu kullanılarak test verilerinin sınıf değişkenleri kestirilebilir. Elde edilen kestirimler kullanılarak tüm modeller için RMSE ölçüsü aşağıdaki gibi hesaplanabilir:
+
+```{r}
+predLM <- predict(fitLM, newdata = ts[,-1])
+predSVM <- predict(fitSVM, newdata = ts[,-1])
+predRF <- predict(fitRF, newdata = ts[,-1])
+predLASSO <- predict(fitLASSO, newdata = ts[,-1])
+
+RMSE <- data.frame(rmseLM = rmse(predLM, ts[,1]), rmseRF = rmse(predRF, ts[,1]), 
+                   rmseSVM = rmse(predSVM, ts[,1]), rmseLASSO = rmse(predLASSO, ts[,1]))
+print(RMSE)
+```
+
+En düşük RMSE istatistiği, dolayısıyle en iyi performans doğrusal regresyon modelleri için elde edilmiştir.
+
+
+# Model yeterliliği ve artıkların analizi
+En iyi performansın elde edildiği doğrusal regresyon modelleri için model yeterliliği incelenmeli ve artıklar analiz edilmelidir. Bu amaçla aşağıdaki kodlar kullanılarak model yeterliliği ve artıkların grafikleri elde edilebilir:
+
+```{r}
+model <- fitLM
+res.train <- data.frame(Actual = ts[,1], Predicted = predLM)
+
+res.train <- res.train %>%
+  mutate(Residuals = Actual - Predicted, 
+         Std.Residuals = Residuals / sd(Residuals))
+
+res.train <- data.frame(ResidID = 1:nrow(res.train), res.train)
+
+plots <- diagnosticPlots(res.train)
+multiplot(plotlist = plots, cols = 2)
+
+```
+
+
+<br>
+\vspace*{12pt}
+
+```{r}
+sessionInfo()
+```
+
+\vspace*{12pt}
+
+
