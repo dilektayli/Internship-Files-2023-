@@ -1,0 +1,343 @@
+**Types of Logs:** 
+
+You might work with any of the following kinds of input data:
+
+1. transactional logs 
+    - records specific event. Like transactional log might record an IP address
+2. attribute data
+    - contains snapshots of information. Like user demographics & search history at time of query.
+    - is not specific to event or a moment in time.
+    - critical to use event timestamps when looking up attribute data
+3. aggregate statics (mazaka web öneri uygulaması)
+    - create an attribute from multiple transactional logs. Like frequency of user queries & average click rate on a certain ad
+
+************************************************************Identifying Labels and Sources************************************************************
+
+direct labels → if you want to predict whether a user is a Taylor Swift fan, a direct label would be “User is a Taylor Swift fan”. 
+
+derived labels → The label is “user has watched a Taylor Swift video” . This is derived label because it does not directly measure what you want to predict
+
+Label Sources:
+
+Direct label for Events: “Did the user click the top search result”
+
+- For events, direct labels are typically straightforward, because you can log the user behavior during the event for use as the label. When labeling events, ask yourself the following questions:
+    - How are your logs structured?
+    - What is considered an “event” in your logs?
+
+Direct label for attributes: “will the adversiter spend more than $x in the next week?
+
+You want to show videos that users want to watch. You use videos they've viewed on YouTube as a label. Is this label direct or derived?
+
+- Derived
+This label is derived because it's not the exact prediction you want to make. Perhaps the user opened the video but closed it shortly afterwards. This event would count as a view even though the user didn't watch the video. In some cases, a heuristic like this might be your only option, but be aware of your label type (direct or derived) and how it limits your predictions.
+
+******Introduction to Sampling******
+
+When there is too much data, and you must select a subset of examples for training. How would you select that subset?
+
+→ To use the feature previous query, you need to sample at the session level, because sessions contain a sequence of queries.
+
+→ To use the feature user behavior from previous days, you need to sample at the user level
+
+******Filtering for PII (Personally Identifiable Information)******
+
+- If your data includes PII (Personally identifiable information), you may need to filter it from your data.
+- This filtering will skew your distribution. You’ll lose information in the tail (the part of the distribution with very low values, far from the mean).
+- This filtering is helpful because very infrequent features are hard to learn. But it’s important to realize that your dataset will be biased toward the head queries.
+
+**→ If you filter PII from your dataset, and in the process you remove the tail, the dataset will be biased toward the head queries. Consider the implications for your project.**
+
+**Imbalanced Data**
+
+A classification data set with skewed class proportions is called “imbalanced”. Classes that make up a large proportion of the data set are called “majority classes”. Those that make up a smaller proportion are “minority classes”. 
+
+![distribution-true-v2.svg](https://s3-us-west-2.amazonaws.com/secure.notion-static.com/a7b189af-4fb5-4659-b7e6-224c146f0325/distribution-true-v2.svg)
+
+What counts as imbalanced? The answer could range from mild to extreme, as the table below shows.
+
+| Degree of imbalance | Proportion of Minority Class |
+| --- | --- |
+| Mild | 20-40% of the data set |
+| Moderate | 1-20% of the data set |
+| Extreme | <1% of the data set |
+
+Why look out for imbalanced data?
+
+→ You may need to apply a particular sampling technique if you have a classification task with an imbalanced data set. 
+
+→ If you have an imbalanced data set, first try training on the true distribution. If the model works well and generalizes, you’re done. If not, try the following downsampling and upweighting technique. 
+
+**Downsampling and Upweighting** 
+
+*Downsampling* → training on a disproportionately low subset of the majority class examples. 
+
+*Upweighting* → adding an example weight to the downsampled class equal to the factor by which you downsampled.
+
+**Steps:**
+
+1. Downsample the majority class
+
+![distribution-downsampled-v2.svg](https://s3-us-west-2.amazonaws.com/secure.notion-static.com/4289d843-e2a6-4d62-b85f-630ee3c13c81/distribution-downsampled-v2.svg)
+
+1. Upweight the downsampled class
+
+![downsampling-upweighting-v5.svg](https://s3-us-west-2.amazonaws.com/secure.notion-static.com/3c60528f-95e7-4f1d-8c18-868ec2047a2c/downsampling-upweighting-v5.svg)
+
+The weight should be equal to the factor you used to downsample:
+
+**example weight = original example weight x downsampling factor**
+
+Why Downsample and Upweight?
+
+- Faster convergence
+- Disk space
+- Calibration
+
+---
+
+********Randomization******** 
+
+Make your data generation pipeline reproducible. How?
+
+1. **Seed your random number generators** 
+2. **Use invariant has keys** ⇒ you can has each example, and use the resulting integer to decide in which split to place the example. The inputs to your hash function should not change each time you run the data generation program.
+
+Imagine again you were collecting Search queries and using hashing to include or exclude queries. If the hash key only used the query, then across multiple days of data, you’ll either *always* include that query or *always* exclude it. Always including or always excluding a query is bad because:
+
+- Your training set will see a less diverse set of queries.
+- Your evaluation sets will be artificially hard, because they won't overlap with your training data. In reality, at serving time, you'll have seen some of the live traffic in your training data, so your evaluation should reflect that.
+
+Instead you can hash on query + date, which would result in a different hashing each day.
+
+![hashing_on_query.gif](https://s3-us-west-2.amazonaws.com/secure.notion-static.com/98073411-91bc-4606-960a-abd810bfc3ed/hashing_on_query.gif)
+
+You are working on a classification problem, and you randomly split the data into training, evaluation, and testing sets. Your classifier looks like it’s working perfectly! But in production, the classifier is a total failure. You later discover that the problem was caused by the random split. What kinds of data are susceptible to this problem?
+
+- **Data with burstiness (data arriving in intermittent bursts as opposed to a continuous stream)** ⇒ clusters of similar data (the bursts) will show up in both training and testing. The model will make better predictions in testing than with new data
+- **Grouping of data** ⇒ the test set will always be too similar to the training set because clusters of similar data are in both sets. The model will appear to have better predictive power than it does.
+- **Time series data ⇒** Random splitting divides each cluster across the test/train split, providing a “sneak preview” to the model that won’t be avaliable in production.
+
+---
+
+**Transforming Data**
+
+Why do we need it?
+
+- **Mandatory transformations** for data compatibility ⇒ Converting non-numeric features into numeric & Resizing inputs a fixed size.
+- ****************Optional quality transformations ⇒**************** tokenization or lower-casing of text features & normalized numeric features & allowing linear models to introduce non-linearities into feature space.
+
+Explore, Clean, and Visualize Your Data
+
+- examine several rows of data
+- check basic statistics
+- fix missing numerical entries
+- visualize your data frequently
+
+---
+
+**Transforming Numeric Data**
+
+2 ways to tranform
+
+- **Normalizing** ⇒ transforming numeric data to the same scale as other data
+- **Bucketing** ⇒ transforming numeric (usually continuous) data categorical data
+
+→ When normalizing, ensure that the same normalizations are applied at serving time to avoid skew.
+
+---
+
+**************************Normalization**************************
+
+The goal of normalization is to transform features to be similar scale. This improves the performance and training stability of the model. 
+
+Most Common Techniques:
+
+1. **Scaling to a range:**
+    
+    Converting floating-point feature values from their natural range into a standard range-usually 0 and 1. 
+    
+    x’ = (x - xmin) / (xmax - xmin)
+    
+    good choice when:
+    
+    - you know the approximate upper and lower bounds on your data with few or no outliers.
+    - your data is approximately uniformly distributed across that range.
+    - A good example is age. Most age values falls between 0 and 90, and every part of the range has a substantial number of people.
+    - In contrast, you would *not* use scaling on income, because only a few people have very high incomes. The upper bound of the linear scale for income would be very high, and most people would be squeezed into a small part of the scale.
+2. **Feature Clipping:**
+    
+    If your data set contains extreme outliers, you might try it which caps all feature values above (or below) a certain value to fixed value. Example ⇒ remove temperatures above 45
+    
+    ![Comparing a raw distribution and its clipped version](https://s3-us-west-2.amazonaws.com/secure.notion-static.com/a2a47c27-d03a-4d90-bc15-498225cd9b3f/norm-clipping-outliers.svg)
+    
+    Comparing a raw distribution and its clipped version
+    
+3. Log Scaling
+    
+    computes the log of your values to compress a wide range to a narrow range 
+    
+                                 x’ = log(x)
+    
+    - it is helpful when a handful of your values have many points, while most other values have few points.
+    - also known as ”power law” distribution
+    - example ⇒ movie ratings
+    
+     
+    
+    ![Comparing a raw distribution to its log](https://s3-us-west-2.amazonaws.com/secure.notion-static.com/4fd8f8ad-cf78-4080-a918-26c0da783631/norm-log-scaling-movie-ratings.svg)
+    
+    Comparing a raw distribution to its log
+    
+4. z-score
+    - variation of scaling that represents the number of standard deviations away from the mean.
+    - to ensure your feature distributions have mean = 0 and std = 1
+    - it is useful when there are a few outliers, but no so extreme you need clipping
+        
+        x’ = (x - *μ* **) /** *σ*  where *μ* is the mean and *σ is the standard deviation.* 
+        
+        ![Comparing a raw distribution to its z-score distribution](https://s3-us-west-2.amazonaws.com/secure.notion-static.com/3c2d223e-142a-4c55-8252-0c5ed426ed8c/norm-z-score.svg)
+        
+        Comparing a raw distribution to its z-score distribution
+        
+        Notice that z-score squeezes raw values that have a range of ~40000 down into a range from roughly -1 to +4.
+        
+        Suppose you're not sure whether the outliers truly are extreme. In this case, start with z-score unless you have feature values that you don't want the model to learn; for example, the values are the result of measurement error or a quirk.
+        
+    
+    **Summary** 
+    
+    | Normalization Technique | Formula | When to Use |
+    | --- | --- | --- |
+    | Linear Scaling | x’ = (x - xmin ) / (xmax - xmin) | When the feature is more-or-less uniformly distributed across a fixed range. |
+    | Clipping | if x > max, then x' = max. if x < min, then x' = min | When the feature contains some extreme outliers. |
+    | Log Scaling | x' = log(x) | When the feature conforms to the power law. |
+    | Z-score | x' = (x - μ) / σ | When the feature distribution does not contain extreme outliers. |
+
+![Summary of normalization techniques](https://s3-us-west-2.amazonaws.com/secure.notion-static.com/b2114de5-e6d9-4977-87ae-977b190d80f8/normalizations-at-a-glance-v2.svg)
+
+Summary of normalization techniques
+
+---
+
+**************Bucketing**************
+
+![House prices vs latitude](https://s3-us-west-2.amazonaws.com/secure.notion-static.com/37622a50-0efb-4f10-8644-681dc30ceb78/ScalingBinningPart1.svg)
+
+House prices vs latitude
+
+![House prices vs latitude, now divided into buckets](https://s3-us-west-2.amazonaws.com/secure.notion-static.com/f493c9cd-d27a-4945-8b30-874c44ba543c/ScalingBinningPart2.svg)
+
+House prices vs latitude, now divided into buckets
+
+This transformation of numeric features into categorical features, using a set of thresholds, is called “bucketing” (or bining). In this example, the boundaries are equally spaced. 
+
+********************Quantile Bucketing******************** 
+
+The problem is that equally spaced buckets don’t capture this distribution well. The solution lies in creating buckets that each have the same number of points. This technique is called ”quantile bucketing”
+
+![bucketizing-applied.svg](https://s3-us-west-2.amazonaws.com/secure.notion-static.com/112dadf0-21d6-4bc2-a563-a8214da55b76/bucketizing-applied.svg)
+
+**Summary**
+
+- Buckets with equally spaced boundaries
+- Buckets with quantile boundaries
+
+Bucketing with equally spaced boundaries is an easy method that works for a lot of data distributions. For skewed data, however, try bucketing with quantile bucketing. 
+
+---
+
+**********Transforming Categorical Data**********
+
+Some of your features may be discrete values that are not in an ordered relationship. Like breeds of dogs, words, postal codes. These features are called categorical. 
+
+![a unique feature for each category](https://s3-us-west-2.amazonaws.com/secure.notion-static.com/c06348c1-bb13-48ea-8805-8820f02f864f/categorical-netview.svg)
+
+a unique feature for each category
+
+![Indexed features](https://s3-us-west-2.amazonaws.com/secure.notion-static.com/055e5500-e393-40dd-84c6-e30676f3fd5e/categorical-netview-indexed.svg)
+
+Indexed features
+
+Vocabulary
+
+| Index Number | Category |
+| --- | --- |
+| 0 | Red |
+| 1 | Orange |
+| 2 | Blue |
+| ... | ... |
+
+This sort of mapping is called a vocabulary.
+
+![The end-to-end process to map categories to feature vectors ](https://s3-us-west-2.amazonaws.com/secure.notion-static.com/a14cc2c6-3c4e-4ecd-a865-393afcd95ab1/vocabulary-index-sparse-feature.svg)
+
+The end-to-end process to map categories to feature vectors 
+
+********************************************************************Note about sparse representation:******************************************************************** 
+
+If your categories are the days of the week, you might, for example, end up representing Friday with the feature vector [0, 0, 0, 0, 1, 0, 0]. However, most implementations of ML systems will represent this vector in memory with a sparse representation. A common representation is a list of non-empty values and their corresponding indices—for example, 1.0 for the value and [4] for the index. This allows you to spend less memory storing a huge amount of 0s and allows more efficient matrix multiplication. In terms of the underlying math, the [4] is equivalent to [0, 0, 0, 0, 1, 0, 0].
+
+************************Out of Vocab (OOV):************************
+
+Just as numerical data contains outliers, categorical data does, as well. For example, consider a data set containing descriptions of cars. One of the features of this data set could be the car's color. Suppose the common car colors (black, white, gray, and so on) are well represented in this data set and you make each one of them into a category so you can learn how these different colors affect value. However, suppose this data set contains a small number of cars with eccentric colors (mauve, puce, avocado). Rather than giving each of these colors a separate category, you could lump them into a catch-all category called **Out of Vocab** (**OOV**). By using OOV, the system won't waste time training on each of those rare colors.
+
+**************Hashing:**************
+
+Another option is to hash every string (category) into your available index space. Hashing often causes collisions, but you rely on the model learning some shared representation of the categories in the same index that works well for the given problem.
+
+For important terms, hashing can be worse than selecting a vocabulary, because of collisions. On the other hand, hashing doesn't require you to assemble a vocabulary, which is advantageous if the feature distribution changes heavily over time. 
+
+![mapping items to a vocabulary](https://s3-us-west-2.amazonaws.com/secure.notion-static.com/4368258d-777b-483c-b47f-0fbf6f7a270e/vocab-hash-string.svg)
+
+mapping items to a vocabulary
+
+******************************************************Hybrid of Hashing and Vocabulary******************************************************
+
+You can take a hybrid approach and combine hashing with a vocabulary. Use a vocabulary for the most important categories in your data, but replace the OOV bucket with multiple OOV buckets, and use hashing to assign categories to buckets.
+
+The categories in the hash buckets must share an index, and the model likely won't make good predictions, but we have allocated some amount of memory to attempt to learn the categories outside of our vocabulary.
+
+![Hybrid approach combining vocabulary and hashing](https://s3-us-west-2.amazonaws.com/secure.notion-static.com/43075b08-4443-40ab-a9a3-8f81d8589c2b/vocab-hybrid.svg)
+
+Hybrid approach combining vocabulary and hashing
+
+---
+
+1. You’re preprocessing data for a regression model. What transformations are mandatory?
+    - Converting all non-numeric features into numeric features.
+2. Considering the chart below. Which data transformation technique would likely be the most productive to start with and why?
+
+![transform-cyu-powerlaw.svg](https://s3-us-west-2.amazonaws.com/secure.notion-static.com/f890c17d-ae87-4184-860e-3d8aa6e4a74e/transform-cyu-powerlaw.svg)
+
+- Log scaling is a good choice here because the data conformns to the law distribution.
+
+---
+
+→ Z-score is a good choice if the outliers are not so extreme that you need clipping. 
+
+→ Clipping is a good choice when there are extreme outliers. 
+
+→ Bucketing (bining) with quantile boundaries is a good choice when you have a skewed data. 
+
+---
+
+1. Consider the chart below. Would a linear model make a good prediction about the relationship between compression-ration and city-mpg? If not, how might you transform the data to better train the model?
+
+![transform-cyu-bucketing.svg](https://s3-us-west-2.amazonaws.com/secure.notion-static.com/b6f32170-52a9-41b4-a112-08a4cc93f703/transform-cyu-bucketing.svg)
+
+- No. There seems to be two different behaviors happening. Setting a threshold in the middle and using a bucketized feature might help you better understand what’s happening in those two areas.
+
+---
+
+1. Consider the below. Which data transformation technique would likely be the most productive to start with and why? Assume your goal is to find a linear relationship between roomsPerPerson and house price?
+
+![transform-cyu-outlier.svg](https://s3-us-west-2.amazonaws.com/secure.notion-static.com/abf62611-a5c8-451a-bd0a-92c86cd33539/transform-cyu-outlier.svg)
+
+- Clipping is a good choice here because the data set contains extreme outliers. You should fix extreme outliers before applying other normalizaitons.
+
+---
+
+1. A peer team is telling you about the progress they’ve made on their ML project. They computed a vocabulary and trained a model offline. They want to avoid staleness issues, however, so they’re now about to train a different model online. What might happen next?
+    
+    → They may find that the indices they’re using don’t correspond to the vocab.
