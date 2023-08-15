@@ -11,9 +11,7 @@ ui <- fluidPage(
   
   sidebarLayout(
     sidebarPanel(
-      helpText("Select a stock to examine.
-
-        Information will be collected from Yahoo finance."),
+      helpText("Select a stock to examine. Information will be collected from Yahoo finance."),
       textInput("symb", "Symbol", "SPY"),
       
       dateRangeInput("dates",
@@ -24,11 +22,9 @@ ui <- fluidPage(
       br(),
       br(),
       
-      checkboxInput("log", "Plot y axis on log scale",
-                    value = FALSE),
+      checkboxInput("log", "Plot y axis on log scale", value = FALSE),
       
-      checkboxInput("adjust",
-                    "Adjust prices for inflation", value = FALSE)
+      checkboxInput("adjust", "Adjust prices for inflation", value = FALSE)
     ),
     
     mainPanel(plotOutput("plot"))
@@ -38,6 +34,7 @@ ui <- fluidPage(
 # Server logic
 server <- function(input, output) {
   
+###to prevent Shiny from re-running code unncessarily
   dataInput <- reactive({
     getSymbols(input$symb, src = "yahoo",
                from = input$dates[1],
